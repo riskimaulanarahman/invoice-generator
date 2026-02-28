@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useInvoiceStore } from '@/store/invoice-store';
 import { InvoiceStatus, Invoice } from '@/types/invoice';
-import { formatRupiah } from '@/utils/currency';
+import { formatRupiah, parseRupiah } from '@/utils/currency';
 import { formatDate, getTodayISO, getDefaultDueDate } from '@/utils/date';
 import { searchInvoices, duplicateInvoice as duplicateInvoiceStorage } from '@/utils/storage';
 import { InvoicePreview } from '@/components/invoice/invoice-preview';
@@ -44,6 +44,15 @@ import { Toaster } from '@/components/ui/toaster';
 import { useReactToPrint } from 'react-to-print';
 import { cn } from '@/lib/utils';
 import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import {
   Plus,
   Search,
   FileText,
@@ -67,6 +76,10 @@ import {
   List,
 } from 'lucide-react';
 
+const WARNING_DISMISS_UNTIL_KEY = 'invoice_warning_dismissed_until';
+const COOKIE_CONSENT_NAME = 'invoice_cookie_consent';
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
 // Debounce hook
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
@@ -84,7 +97,7 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue;
 }
 
-export default function InvoiceBuilder() {
+export default function InvoiceGenerator() {
   const { toast } = useToast();
   const {
     invoices,
@@ -101,6 +114,7 @@ export default function InvoiceBuilder() {
     addItem,
     updateItem,
     removeItem,
+    reorderItems,
     updateDiscount,
     updateTaxRate,
     updateFee,
@@ -125,6 +139,44 @@ export default function InvoiceBuilder() {
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [isMobile, setIsMobile] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [showStorageWarning, setShowStorageWarning] = useState(false);
+  const [showCookieConsent, setShowCookieConsent] = useState(false);
+  const summary = currentInvoice?.summary;
+  const discountType = summary?.discountType || 'fixed';
+  const discountValue = summary?.discountValue || 0;
+  const normalizedDiscountValue = discountType === 'percentage'
+    ? Math.min(100, Math.max(0, discountValue))
+    : Math.max(0, discountValue);
+  const isDiscountCapped = Boolean(
+    summary && (
+      (discountType === 'percentage' && discountValue > 100) ||
+      (discountType === 'fixed' && discountValue > summary.subTotal)
+    )
+  );
+  const discountPreviewText = summary
+    ? normalizedDiscountValue > 0
+      ? discountType === 'percentage'
+        ? `Diskon ${normalizedDiscountValue}% mengurangi ${formatRupiah(summary.discountAmount)} dari subtotal ${formatRupiah(summary.subTotal)}.`
+        : `Diskon nominal ${formatRupiah(normalizedDiscountValue)} mengurangi ${formatRupiah(summary.discountAmount)} dari subtotal ${formatRupiah(summary.subTotal)}.`
+      : 'Masukkan diskon untuk melihat potongan otomatis pada total invoice.'
+    : 'Masukkan diskon untuk melihat potongan otomatis pada total invoice.';
+  const itemSensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    })
+  );
+  const handleItemDragEnd = useCallback((event: DragEndEvent) => {
+    if (!currentInvoice) return;
+
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = currentInvoice.items.findIndex((item) => item.id === String(active.id));
+    const newIndex = currentInvoice.items.findIndex((item) => item.id === String(over.id));
+
+    if (oldIndex < 0 || newIndex < 0) return;
+    reorderItems(arrayMove(currentInvoice.items, oldIndex, newIndex));
+  }, [currentInvoice, reorderItems]);
 
   // Print ref
   const printRef = useRef<HTMLDivElement>(null);
@@ -144,6 +196,29 @@ export default function InvoiceBuilder() {
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Browser storage warning and cookie consent visibility
+  useEffect(() => {
+    try {
+      const dismissedUntilRaw = localStorage.getItem(WARNING_DISMISS_UNTIL_KEY);
+      const dismissedUntil = dismissedUntilRaw ? Number(dismissedUntilRaw) : 0;
+      setShowStorageWarning(!Number.isFinite(dismissedUntil) || dismissedUntil <= Date.now());
+    } catch (error) {
+      console.error('Error reading storage warning preference:', error);
+      setShowStorageWarning(true);
+    }
+
+    try {
+      const hasCookieConsent = document.cookie
+        .split(';')
+        .map((cookiePart) => cookiePart.trim())
+        .some((cookiePart) => cookiePart === `${COOKIE_CONSENT_NAME}=accepted`);
+      setShowCookieConsent(!hasCookieConsent);
+    } catch (error) {
+      console.error('Error reading cookie consent preference:', error);
+      setShowCookieConsent(true);
+    }
   }, []);
 
   // Load invoices on mount
@@ -224,6 +299,24 @@ export default function InvoiceBuilder() {
         title: 'Berhasil',
         description: `Invoice ${newInvoice.invoiceNumber} berhasil dibuat`,
       });
+    }
+  };
+
+  const handleCloseStorageWarning = () => {
+    setShowStorageWarning(false);
+    try {
+      localStorage.setItem(WARNING_DISMISS_UNTIL_KEY, String(Date.now() + ONE_DAY_MS));
+    } catch (error) {
+      console.error('Error saving storage warning preference:', error);
+    }
+  };
+
+  const handleAcceptCookies = () => {
+    setShowCookieConsent(false);
+    try {
+      document.cookie = `${COOKIE_CONSENT_NAME}=accepted; Max-Age=31536000; Path=/; SameSite=Lax`;
+    } catch (error) {
+      console.error('Error saving cookie consent:', error);
     }
   };
 
@@ -350,6 +443,47 @@ export default function InvoiceBuilder() {
     overdue: invoices.filter((i) => i.status === 'Overdue').length,
   };
 
+  const renderStorageWarning = () => {
+    if (!showStorageWarning) return null;
+
+    return (
+      <Alert className="mt-3 border-amber-300 bg-amber-50 text-amber-900 [&>svg]:text-amber-700">
+        <AlertCircle className="h-4 w-4" />
+        <AlertDescription className="pr-8 text-amber-900">
+          Data invoice disimpan di browser (local storage). Jika cookies/site data dibersihkan, invoice dapat
+          terhapus. Disarankan selalu download/export PDF sebagai cadangan.
+        </AlertDescription>
+        <button
+          type="button"
+          onClick={handleCloseStorageWarning}
+          className="absolute right-2 top-2 rounded-md p-1 text-amber-800/70 hover:bg-amber-100 hover:text-amber-900"
+          aria-label="Tutup peringatan penyimpanan"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </Alert>
+    );
+  };
+
+  const renderCookieConsent = () => {
+    if (!showCookieConsent) return null;
+
+    return (
+      <div className="fixed inset-x-4 bottom-20 z-[60] md:bottom-4">
+        <Card className="mx-auto max-w-3xl border shadow-lg">
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              Kami menggunakan cookies untuk menyimpan preferensi penggunaan aplikasi di browser Anda.
+            </p>
+            <Button size="sm" onClick={handleAcceptCookies} className="w-full sm:w-auto">
+              Izinkan Cookies
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  };
+
   // RENDER LIST VIEW
   if (view === 'list') {
     return (
@@ -359,9 +493,14 @@ export default function InvoiceBuilder() {
           <div className="container max-w-6xl mx-auto px-4 py-4">
             <div className="flex items-center justify-between">
               <div>
-                <h1 className="text-xl md:text-2xl font-bold">Invoice Builder</h1>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl md:text-2xl font-bold">Invoice Generator</h1>
+                  <Badge variant="secondary" className="text-xs">
+                    Gratis Digunakan
+                  </Badge>
+                </div>
                 <p className="text-sm text-muted-foreground hidden md:block">
-                  Kelola dan buat invoice dengan mudah
+                  Aplikasi invoice online gratis untuk buat, simpan, dan export invoice PDF dengan mudah.
                 </p>
               </div>
               <Button onClick={handleCreateNew} className="gap-2">
@@ -369,10 +508,21 @@ export default function InvoiceBuilder() {
                 <span className="hidden sm:inline">Buat Invoice</span>
               </Button>
             </div>
+            {renderStorageWarning()}
           </div>
         </header>
 
         <main className="container max-w-6xl mx-auto px-4 py-4 md:py-6">
+          <section className="mb-6 rounded-lg border bg-muted/30 p-4">
+            <h2 className="text-base md:text-lg font-semibold">
+              Sistem Invoice Gratis untuk UMKM dan Freelancer
+            </h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              Invoice Generator adalah sistem yang free digunakan tanpa biaya berlangganan. Anda bisa
+              membuat invoice profesional, mengelola data klien, dan export PDF A4 kapan saja.
+            </p>
+          </section>
+
           {/* Stats */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
             <Card className="p-3">
@@ -497,6 +647,7 @@ export default function InvoiceBuilder() {
           </DialogContent>
         </Dialog>
 
+        {renderCookieConsent()}
         <Toaster />
       </div>
     );
@@ -548,6 +699,7 @@ export default function InvoiceBuilder() {
               </Button>
             </div>
           </div>
+          {renderStorageWarning()}
 
           {/* Mobile Tabs */}
           <Tabs value={editorTab} onValueChange={(v) => setEditorTab(v as 'form' | 'preview')} className="mt-3 md:hidden">
@@ -749,6 +901,9 @@ export default function InvoiceBuilder() {
                     Tambah
                   </Button>
                 </div>
+                <CardDescription className="text-xs">
+                  Isi deskripsi, qty, harga, lalu sesuaikan diskon/pajak per item bila diperlukan. Seret ikon handle untuk mengubah urutan item.
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 {currentInvoice?.items.length === 0 ? (
@@ -762,17 +917,28 @@ export default function InvoiceBuilder() {
                 ) : (
                   <>
                     <ItemTableHeader />
-                    <div className="border rounded-md p-2">
-                      {currentInvoice?.items.map((item, index) => (
-                        <ItemRow
-                          key={item.id}
-                          item={item}
-                          index={index}
-                          onUpdate={updateItem}
-                          onRemove={removeItem}
-                          canRemove={currentInvoice.items.length > 1}
-                        />
-                      ))}
+                    <div className="space-y-2">
+                      <DndContext
+                        sensors={itemSensors}
+                        collisionDetection={closestCenter}
+                        onDragEnd={handleItemDragEnd}
+                      >
+                        <SortableContext
+                          items={currentInvoice?.items.map((item) => item.id) || []}
+                          strategy={verticalListSortingStrategy}
+                        >
+                          {currentInvoice?.items.map((item, index) => (
+                            <ItemRow
+                              key={item.id}
+                              item={item}
+                              index={index}
+                              onUpdate={updateItem}
+                              onRemove={removeItem}
+                              canRemove={currentInvoice.items.length > 1}
+                            />
+                          ))}
+                        </SortableContext>
+                      </DndContext>
                     </div>
                   </>
                 )}
@@ -785,25 +951,37 @@ export default function InvoiceBuilder() {
                 <CardTitle className="text-base">Ringkasan</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <Label className="text-xs">Diskon Invoice</Label>
                     <div className="flex gap-1">
                       <Input
-                        type="number"
+                        type={discountType === 'percentage' ? 'number' : 'text'}
                         min={0}
-                        value={currentInvoice?.summary.discountValue || ''}
+                        max={discountType === 'percentage' ? 100 : undefined}
+                        inputMode={discountType === 'percentage' ? 'decimal' : 'numeric'}
+                        value={
+                          discountType === 'percentage'
+                            ? (discountValue || '')
+                            : discountValue === 0
+                              ? ''
+                              : formatRupiah(discountValue, false)
+                        }
                         onChange={(e) => updateDiscount(
-                          currentInvoice?.summary.discountType || 'fixed',
-                          parseFloat(e.target.value) || 0
+                          discountType,
+                          discountType === 'percentage'
+                            ? Math.min(100, Math.max(0, parseFloat(e.target.value) || 0))
+                            : Math.max(0, parseRupiah(e.target.value))
                         )}
-                        placeholder="0"
+                        placeholder={discountType === 'percentage' ? '0 - 100' : 'Rp 0'}
                       />
                       <Select
-                        value={currentInvoice?.summary.discountType || 'fixed'}
+                        value={discountType}
                         onValueChange={(v) => updateDiscount(
                           v as 'fixed' | 'percentage',
-                          currentInvoice?.summary.discountValue || 0
+                          v === 'percentage'
+                            ? Math.min(100, Math.max(0, currentInvoice?.summary.discountValue || 0))
+                            : Math.max(0, currentInvoice?.summary.discountValue || 0)
                         )}
                       >
                         <SelectTrigger className="w-16">
@@ -815,6 +993,9 @@ export default function InvoiceBuilder() {
                         </SelectContent>
                       </Select>
                     </div>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {discountType === 'percentage' ? 'Gunakan nilai 0 sampai 100.' : 'Input dalam nominal Rupiah.'}
+                    </p>
                   </div>
                   <div>
                     <Label className="text-xs">PPN (%)</Label>
@@ -822,9 +1003,9 @@ export default function InvoiceBuilder() {
                       type="number"
                       min={0}
                       max={100}
-                      value={currentInvoice?.summary.taxRate ?? 11}
+                      value={currentInvoice?.summary.taxRate ?? 0}
                       onChange={(e) => updateTaxRate(parseFloat(e.target.value) || 0)}
-                      placeholder="11"
+                      placeholder="0"
                     />
                   </div>
                   <div>
@@ -838,6 +1019,16 @@ export default function InvoiceBuilder() {
                     />
                   </div>
                 </div>
+
+                <div className="rounded-md border bg-muted/30 p-3 text-xs">
+                  <p className="font-medium">Preview Diskon</p>
+                  <p className="mt-1 text-muted-foreground">{discountPreviewText}</p>
+                  {isDiscountCapped ? (
+                    <p className="mt-1 text-amber-600">
+                      Nilai diskon melebihi batas, sistem otomatis menyesuaikan saat perhitungan.
+                    </p>
+                  ) : null}
+                </div>
                 
                 <Separator />
                 
@@ -848,7 +1039,11 @@ export default function InvoiceBuilder() {
                   </div>
                   {currentInvoice?.summary.discountValue ? (
                     <div className="flex justify-between text-green-600">
-                      <span>Diskon</span>
+                      <span>
+                        Diskon {currentInvoice.summary.discountType === 'percentage'
+                          ? `(${currentInvoice.summary.discountValue}%)`
+                          : '(Nominal)'}
+                      </span>
                       <span>- {formatRupiah(currentInvoice.summary.discountAmount)}</span>
                     </div>
                   ) : null}
@@ -986,6 +1181,7 @@ export default function InvoiceBuilder() {
       {/* Bottom Nav */}
       <BottomNav currentPage="editor" onNavigate={setView} />
 
+      {renderCookieConsent()}
       <Toaster />
     </div>
   );

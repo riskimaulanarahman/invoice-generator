@@ -13,18 +13,72 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const rawSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+const siteUrl = rawSiteUrl
+  ? rawSiteUrl.startsWith("http://") || rawSiteUrl.startsWith("https://")
+    ? rawSiteUrl
+    : `https://${rawSiteUrl}`
+  : "http://localhost:3000";
+const googleVerification = process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION?.trim();
+
 export const metadata: Metadata = {
-  title: "Invoice Builder - Buat & Kelola Invoice",
-  description: "Aplikasi Invoice Builder untuk membuat dan mengelola invoice profesional. Export ke PDF dengan format A4.",
-  keywords: ["Invoice", "Invoice Builder", "PDF", "Next.js", "TypeScript", "Indonesia"],
-  authors: [{ name: "Invoice Builder" }],
+  metadataBase: new URL(siteUrl),
+  title: {
+    default: "Invoice Generator Gratis - Buat Invoice Online",
+    template: "%s | Invoice Generator Gratis",
+  },
+  description:
+    "Invoice Generator adalah aplikasi invoice online gratis untuk membuat, mengelola, dan export invoice PDF format A4 dengan cepat.",
+  keywords: [
+    "invoice generator gratis",
+    "aplikasi invoice online gratis",
+    "buat invoice gratis",
+    "invoice PDF A4",
+    "sistem invoice gratis Indonesia",
+  ],
+  applicationName: "Invoice Generator Gratis",
+  authors: [{ name: "Invoice Generator" }],
+  creator: "Invoice Generator",
+  publisher: "Invoice Generator",
+  category: "business",
+  alternates: {
+    canonical: "/",
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-snippet": -1,
+      "max-image-preview": "large",
+      "max-video-preview": -1,
+    },
+  },
+  verification: googleVerification
+    ? {
+        google: googleVerification,
+      }
+    : undefined,
   icons: {
-    icon: "/logo.svg",
+    icon: [{ url: "/toga-icon.png", type: "image/png" }],
+    shortcut: "/toga-icon.png",
+    apple: "/toga-icon.png",
   },
   openGraph: {
-    title: "Invoice Builder",
-    description: "Buat dan kelola invoice profesional dengan mudah",
+    title: "Invoice Generator Gratis - Buat Invoice Online",
+    description:
+      "Sistem invoice gratis untuk UMKM dan freelancer. Buat, simpan, dan export invoice PDF dengan mudah.",
+    url: "/",
+    siteName: "Invoice Generator Gratis",
+    locale: "id_ID",
     type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Invoice Generator Gratis - Buat Invoice Online",
+    description:
+      "Sistem invoice gratis untuk membuat invoice profesional dan export ke PDF.",
   },
 };
 
@@ -33,11 +87,33 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const webAppStructuredData = {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    name: "Invoice Generator Gratis",
+    applicationCategory: "BusinessApplication",
+    operatingSystem: "Web",
+    description:
+      "Aplikasi invoice online gratis untuk membuat dan mengelola invoice profesional.",
+    offers: {
+      "@type": "Offer",
+      price: "0",
+      priceCurrency: "IDR",
+      description: "Gratis digunakan",
+    },
+  };
+
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="id" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(webAppStructuredData),
+          }}
+        />
         {children}
         <Toaster />
       </body>

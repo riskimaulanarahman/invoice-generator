@@ -27,7 +27,7 @@ export interface InvoiceItem {
   unitPrice: number;
   discountType?: DiscountType;
   discountValue?: number;
-  taxRate?: number; // percentage, e.g., 11 for PPN
+  taxRate?: number; // percentage, e.g., 0-100
   lineTotal: number;
 }
 
@@ -36,7 +36,7 @@ export interface InvoiceSummary {
   discountType: DiscountType;
   discountValue: number;
   discountAmount: number;
-  taxRate: number; // percentage
+  taxRate: number; // percentage (0-100)
   taxAmount: number;
   fee: number;
   grandTotal: number;
@@ -125,7 +125,7 @@ export const defaultSummary: InvoiceSummary = {
   discountType: 'fixed',
   discountValue: 0,
   discountAmount: 0,
-  taxRate: 11,
+  taxRate: 0,
   taxAmount: 0,
   fee: 0,
   grandTotal: 0,
