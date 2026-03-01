@@ -136,6 +136,7 @@ export default function InvoiceGenerator() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [invoiceToDelete, setInvoiceToDelete] = useState<string | null>(null);
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
+  const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [isMobile, setIsMobile] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -484,6 +485,53 @@ export default function InvoiceGenerator() {
     );
   };
 
+  const renderAboutDialog = () => {
+    return (
+      <Dialog open={aboutDialogOpen} onOpenChange={setAboutDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Tentang Kami</DialogTitle>
+            <DialogDescription>
+              Hubungi dan kunjungi kanal resmi kami.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 text-sm">
+            <p>
+              Instagram:{' '}
+              <a
+                href="https://instagram.com/togoldarea"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-primary hover:underline"
+              >
+                @togoldarea
+              </a>
+            </p>
+            <p>
+              Website:{' '}
+              <a
+                href="https://www.togoldarea.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-primary hover:underline"
+              >
+                www.togoldarea.com
+              </a>
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
+  const handleBottomNavNavigate = (page: 'list' | 'editor' | 'about') => {
+    if (page === 'about') {
+      setAboutDialogOpen(true);
+      return;
+    }
+    setView(page);
+  };
+
   // RENDER LIST VIEW
   if (view === 'list') {
     return (
@@ -615,7 +663,7 @@ export default function InvoiceGenerator() {
         </main>
 
         {/* Bottom Nav */}
-        <BottomNav currentPage="list" onNavigate={setView} />
+        <BottomNav currentPage="list" onNavigate={handleBottomNavNavigate} />
 
         {/* Delete Confirmation Dialog */}
         <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
@@ -647,6 +695,7 @@ export default function InvoiceGenerator() {
           </DialogContent>
         </Dialog>
 
+        {renderAboutDialog()}
         {renderCookieConsent()}
         <Toaster />
       </div>
@@ -1179,8 +1228,9 @@ export default function InvoiceGenerator() {
       </main>
 
       {/* Bottom Nav */}
-      <BottomNav currentPage="editor" onNavigate={setView} />
+      <BottomNav currentPage="editor" onNavigate={handleBottomNavNavigate} />
 
+      {renderAboutDialog()}
       {renderCookieConsent()}
       <Toaster />
     </div>

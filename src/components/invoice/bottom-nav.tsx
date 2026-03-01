@@ -2,18 +2,18 @@
 
 'use client';
 
-import { Home, FilePlus, Settings, Search } from 'lucide-react';
+import { Home, FilePlus, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useInvoiceStore } from '@/store/invoice-store';
 
 interface BottomNavProps {
   currentPage: 'list' | 'editor';
-  onNavigate: (page: 'list' | 'editor') => void;
+  onNavigate: (page: 'list' | 'editor' | 'about') => void;
 }
 
 const navItems = [
   { id: 'list' as const, label: 'Invoice', icon: Home },
   { id: 'editor' as const, label: 'Buat', icon: FilePlus },
+  { id: 'about' as const, label: 'Tentang Kami', icon: Info },
 ];
 
 export function BottomNav({ currentPage, onNavigate }: BottomNavProps) {
@@ -22,7 +22,7 @@ export function BottomNav({ currentPage, onNavigate }: BottomNavProps) {
       <div className="flex items-center justify-around h-16 max-w-lg mx-auto px-4">
         {navItems.map((item) => {
           const Icon = item.icon;
-          const isActive = currentPage === item.id;
+          const isActive = item.id !== 'about' && currentPage === item.id;
           
           return (
             <button

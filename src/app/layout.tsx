@@ -115,6 +115,28 @@ export default function RootLayout({
           }}
         />
         {children}
+        <footer className="border-t border-border bg-background/95 px-4 py-3 text-center text-sm text-muted-foreground">
+          <p>
+            Instagram:{" "}
+            <a
+              href="https://instagram.com/togoldarea"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-foreground hover:underline"
+            >
+              @togoldarea
+            </a>{" "}
+            | Website:{" "}
+            <a
+              href="https://www.togoldarea.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-foreground hover:underline"
+            >
+              www.togoldarea.com
+            </a>
+          </p>
+        </footer>
         <Toaster />
       </body>
     </html>
