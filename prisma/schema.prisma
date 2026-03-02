@@ -30,3 +30,18 @@ model Post {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+model VisitorEvent {
+  id              String   @id @default(cuid())
+  fingerprintHash String
+  path            String
+  dayKey          String
+  monthKey        String
+  yearKey         String
+  createdAt       DateTime @default(now())
+
+  @@index([dayKey])
+  @@index([monthKey])
+  @@index([yearKey])
+  @@index([fingerprintHash, createdAt])
+}

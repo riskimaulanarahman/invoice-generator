@@ -74,11 +74,28 @@ import {
   Sparkles,
   LayoutGrid,
   List,
+  Info,
+  RefreshCw,
 } from 'lucide-react';
 
 const WARNING_DISMISS_UNTIL_KEY = 'invoice_warning_dismissed_until';
 const COOKIE_CONSENT_NAME = 'invoice_cookie_consent';
+const TRAFFIC_TRACKED_SESSION_KEY = 'traffic_tracked_v1';
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+type TrafficPeriodStats = {
+  unique: number;
+  total: number;
+  periodLabel: string;
+};
+
+type TrafficSummaryResponse = {
+  timezone: string;
+  updatedAt: string;
+  daily: TrafficPeriodStats;
+  monthly: TrafficPeriodStats;
+  yearly: TrafficPeriodStats;
+};
 
 // Debounce hook
 function useDebounce<T>(value: T, delay: number): T {
@@ -142,6 +159,10 @@ export default function InvoiceGenerator() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [showStorageWarning, setShowStorageWarning] = useState(false);
   const [showCookieConsent, setShowCookieConsent] = useState(false);
+  const [trafficDialogOpen, setTrafficDialogOpen] = useState(false);
+  const [trafficStats, setTrafficStats] = useState<TrafficSummaryResponse | null>(null);
+  const [trafficLoading, setTrafficLoading] = useState(false);
+  const [trafficError, setTrafficError] = useState<string | null>(null);
   const summary = currentInvoice?.summary;
   const discountType = summary?.discountType || 'fixed';
   const discountValue = summary?.discountValue || 0;
@@ -226,6 +247,28 @@ export default function InvoiceGenerator() {
   useEffect(() => {
     loadInvoices();
   }, [loadInvoices]);
+
+  // Track visitor once per tab session
+  useEffect(() => {
+    try {
+      const tracked = sessionStorage.getItem(TRAFFIC_TRACKED_SESSION_KEY);
+      if (tracked === '1') return;
+
+      sessionStorage.setItem(TRAFFIC_TRACKED_SESSION_KEY, '1');
+      void fetch('/api/traffic/track', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          path: window.location.pathname || '/',
+        }),
+        keepalive: true,
+      });
+    } catch (error) {
+      console.error('Error tracking visitor traffic:', error);
+    }
+  }, []);
 
   // Autosave
   useEffect(() => {
@@ -318,6 +361,37 @@ export default function InvoiceGenerator() {
       document.cookie = `${COOKIE_CONSENT_NAME}=accepted; Max-Age=31536000; Path=/; SameSite=Lax`;
     } catch (error) {
       console.error('Error saving cookie consent:', error);
+    }
+  };
+
+  const fetchTrafficSummary = useCallback(async () => {
+    setTrafficLoading(true);
+    setTrafficError(null);
+
+    try {
+      const response = await fetch('/api/traffic/summary', {
+        method: 'GET',
+        cache: 'no-store',
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = (await response.json()) as TrafficSummaryResponse;
+      setTrafficStats(data);
+    } catch (error) {
+      console.error('Error fetching traffic summary:', error);
+      setTrafficError('Gagal memuat data traffic. Silakan coba lagi.');
+    } finally {
+      setTrafficLoading(false);
+    }
+  }, []);
+
+  const handleOpenTrafficDialog = () => {
+    setTrafficDialogOpen(true);
+    if (!trafficStats && !trafficLoading) {
+      void fetchTrafficSummary();
     }
   };
 
@@ -485,6 +559,97 @@ export default function InvoiceGenerator() {
     );
   };
 
+  const formatTrafficUpdatedAt = (value: string, timezone: string) => {
+    try {
+      return new Intl.DateTimeFormat('id-ID', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+        timeZone: timezone,
+      }).format(new Date(value));
+    } catch {
+      return '-';
+    }
+  };
+
+  const renderTrafficDialog = () => {
+    const cards: Array<{ key: 'daily' | 'monthly' | 'yearly'; label: string }> = [
+      { key: 'daily', label: 'Daily' },
+      { key: 'monthly', label: 'Monthly' },
+      { key: 'yearly', label: 'Yearly' },
+    ];
+
+    return (
+      <Dialog open={trafficDialogOpen} onOpenChange={setTrafficDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Traffic Pengunjung</DialogTitle>
+            <DialogDescription>
+              Ringkasan traffic pengunjung sistem untuk periode harian, bulanan, dan tahunan.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex items-center justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void fetchTrafficSummary()}
+              disabled={trafficLoading}
+              className="gap-2"
+            >
+              <RefreshCw className={cn('h-4 w-4', trafficLoading && 'animate-spin')} />
+              Muat Ulang
+            </Button>
+          </div>
+
+          {trafficError && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{trafficError}</AlertDescription>
+            </Alert>
+          )}
+
+          {trafficLoading && !trafficStats ? (
+            <div className="py-6 text-center text-sm text-muted-foreground">Memuat data traffic...</div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-3">
+              {cards.map((card) => {
+                const value =
+                  card.key === 'daily'
+                    ? trafficStats?.daily
+                    : card.key === 'monthly'
+                      ? trafficStats?.monthly
+                      : trafficStats?.yearly;
+
+                return (
+                  <Card key={card.key}>
+                    <CardContent className="space-y-2 p-4">
+                      <p className="text-sm font-semibold">{card.label}</p>
+                      <p className="text-xs text-muted-foreground">{value?.periodLabel || '-'}</p>
+                      <div className="space-y-1 text-sm">
+                        <p>
+                          Unique: <span className="font-semibold">{value?.unique ?? 0}</span>
+                        </p>
+                        <p>
+                          Total: <span className="font-semibold">{value?.total ?? 0}</span>
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+
+          <p className="text-xs text-muted-foreground">
+            Diperbarui:{' '}
+            {trafficStats ? formatTrafficUpdatedAt(trafficStats.updatedAt, trafficStats.timezone) : '-'}
+          </p>
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
   const renderAboutDialog = () => {
     return (
       <Dialog open={aboutDialogOpen} onOpenChange={setAboutDialogOpen}>
@@ -551,10 +716,21 @@ export default function InvoiceGenerator() {
                   Aplikasi invoice online gratis untuk buat, simpan, dan export invoice PDF dengan mudah.
                 </p>
               </div>
-              <Button onClick={handleCreateNew} className="gap-2">
-                <Plus className="h-4 w-4" />
-                <span className="hidden sm:inline">Buat Invoice</span>
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={handleOpenTrafficDialog}
+                  aria-label="Lihat traffic pengunjung"
+                >
+                  <Info className="h-4 w-4" />
+                </Button>
+                <Button onClick={handleCreateNew} className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  <span className="hidden sm:inline">Buat Invoice</span>
+                </Button>
+              </div>
             </div>
             {renderStorageWarning()}
           </div>
@@ -695,6 +871,7 @@ export default function InvoiceGenerator() {
           </DialogContent>
         </Dialog>
 
+        {renderTrafficDialog()}
         {renderAboutDialog()}
         {renderCookieConsent()}
         <Toaster />
